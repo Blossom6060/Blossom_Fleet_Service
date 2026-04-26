@@ -11,18 +11,10 @@ if not os.path.exists("media"):
 
 conn = sqlite3.connect('fleet_manager.db', check_same_thread=False)
 c = conn.cursor()
-# Updated Table to include 'days'
 c.execute('''CREATE TABLE IF NOT EXISTS trips 
-             (id INTEGER PRIMARY KEY, date TEXT, origin TEXT, destination TEXT, 
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, origin TEXT, destination TEXT, 
               vehicle_no TEXT, days INTEGER, description TEXT, category TEXT, amount REAL, receipt_path TEXT)''')
 conn.commit()
-
-# Migration: Add 'days' column if it doesn't exist in an old database
-try:
-    c.execute("ALTER TABLE trips ADD COLUMN days INTEGER DEFAULT 1")
-    conn.commit()
-except:
-    pass 
 
 # --- APP HEADER ---
 def show_header():
@@ -72,7 +64,6 @@ with tab1:
         with col2:
             dest = st.text_input("To (Destination)")
             
-        # Added Number of Days field
         col_days, col_cat, col_amt = st.columns([1, 2, 2])
         with col_days:
             num_days = st.number_input("No. of Days", min_value=1, step=1, value=1)
@@ -82,7 +73,6 @@ with tab1:
             amt = st.number_input("Amount", min_value=0.0, step=0.01)
 
         desc = st.text_area("Description / Payment Notes")
-        
         submit = st.form_submit_button("Save Entry")
 
     st.write("---")
@@ -102,7 +92,8 @@ with tab1:
                      VALUES (?,?,?,?,?,?,?,?,?)""",
                   (str(date), origin, dest, v_no, int(num_days), desc, cat, amt, img_path))
         conn.commit()
-        st.success(f"Entry saved for {v_no} ({num_days} days)!")
+        st.success(f"Entry saved for {v_no}!")
+        st.rerun()
 
 with tab2:
     st.subheader("Create Itinerary")
@@ -114,13 +105,27 @@ with tab2:
                 st.download_button("Download PDF", f, file_name="Blossom_Itinerary.pdf")
 
 with tab3:
-    st.subheader("Business Summary")
+    st.subheader("Business Summary & Management")
     df = pd.read_sql_query("SELECT * FROM trips", conn)
+    
     if not df.empty:
         st.metric("Total Revenue/Expense", f"₹{df['amount'].sum():,.2f}")
-        # Added 'days' to the dashboard table
+        
+        # Display the table
         st.dataframe(
-            df[['date', 'vehicle_no', 'days', 'origin', 'destination', 'amount', 'description']], 
+            df[['id', 'date', 'vehicle_no', 'days', 'origin', 'destination', 'amount', 'description']], 
             use_container_width=True, 
             hide_index=True
         )
+        
+        st.divider()
+        st.subheader("Delete Incorrect Entries")
+        # Let the user pick an ID to delete
+        delete_id = st.selectbox("Select Trip ID to Remove", df['id'].values)
+        if st.button("Confirm Delete Entry", type="primary"):
+            c.execute("DELETE FROM trips WHERE id = ?", (int(delete_id),))
+            conn.commit()
+            st.warning(f"Entry ID {delete_id} deleted.")
+            st.rerun()
+    else:
+        st.info("No records found.")

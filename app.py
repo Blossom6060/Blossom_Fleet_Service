@@ -11,10 +11,18 @@ if not os.path.exists("media"):
 
 conn = sqlite3.connect('fleet_manager.db', check_same_thread=False)
 c = conn.cursor()
+# Updated Table to include 'days'
 c.execute('''CREATE TABLE IF NOT EXISTS trips 
              (id INTEGER PRIMARY KEY, date TEXT, origin TEXT, destination TEXT, 
-              vehicle_no TEXT, description TEXT, category TEXT, amount REAL, receipt_path TEXT)''')
+              vehicle_no TEXT, days INTEGER, description TEXT, category TEXT, amount REAL, receipt_path TEXT)''')
 conn.commit()
+
+# Migration: Add 'days' column if it doesn't exist in an old database
+try:
+    c.execute("ALTER TABLE trips ADD COLUMN days INTEGER DEFAULT 1")
+    conn.commit()
+except:
+    pass 
 
 # --- APP HEADER ---
 def show_header():
@@ -52,8 +60,11 @@ tab1, tab2, tab3 = st.tabs(["Daily Trip Logger", "Tour Canvas", "Dashboard"])
 with tab1:
     st.subheader("Log New Trip")
     with st.form("trip_form", clear_on_submit=True):
-        date = st.date_input("Date", datetime.now())
-        v_no = st.text_input("Vehicle Number")
+        col_date, col_veh = st.columns(2)
+        with col_date:
+            date = st.date_input("Date", datetime.now())
+        with col_veh:
+            v_no = st.text_input("Vehicle Number")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -61,18 +72,19 @@ with tab1:
         with col2:
             dest = st.text_input("To (Destination)")
             
+        # Added Number of Days field
+        col_days, col_cat, col_amt = st.columns([1, 2, 2])
+        with col_days:
+            num_days = st.number_input("No. of Days", min_value=1, step=1, value=1)
+        with col_cat:
+            cat = st.selectbox("Category", ["Tour Revenue", "Fuel", "Maintenance", "Food", "Toll", "Other"])
+        with col_amt:
+            amt = st.number_input("Amount", min_value=0.0, step=0.01)
+
         desc = st.text_area("Description / Payment Notes")
         
-        col3, col4 = st.columns(2)
-        with col3:
-            cat = st.selectbox("Category", ["Fuel", "Maintenance", "Food", "Toll", "Other"])
-        with col4:
-            amt = st.number_input("Amount", min_value=0.0, step=0.01)
-        
-        # --- NEW CAMERA TOGGLE OUTSIDE FORM (Forms don't support dynamic camera toggles well) ---
         submit = st.form_submit_button("Save Entry")
 
-    # Move camera outside the form so it can be toggled on/off
     st.write("---")
     show_camera = st.checkbox("📸 Open Camera to Snap Receipt")
     camera_photo = None
@@ -86,11 +98,11 @@ with tab1:
             with open(img_path, "wb") as f:
                 f.write(camera_photo.getbuffer())
         
-        c.execute("""INSERT INTO trips (date, origin, destination, vehicle_no, description, category, amount, receipt_path) 
-                     VALUES (?,?,?,?,?,?,?,?)""",
-                  (str(date), origin, dest, v_no, desc, cat, amt, img_path))
+        c.execute("""INSERT INTO trips (date, origin, destination, vehicle_no, days, description, category, amount, receipt_path) 
+                     VALUES (?,?,?,?,?,?,?,?,?)""",
+                  (str(date), origin, dest, v_no, int(num_days), desc, cat, amt, img_path))
         conn.commit()
-        st.success("Entry saved! Remember to uncheck the camera box to save battery.")
+        st.success(f"Entry saved for {v_no} ({num_days} days)!")
 
 with tab2:
     st.subheader("Create Itinerary")
@@ -105,5 +117,10 @@ with tab3:
     st.subheader("Business Summary")
     df = pd.read_sql_query("SELECT * FROM trips", conn)
     if not df.empty:
-        st.metric("Total Amount", f"₹{df['amount'].sum():,.2f}")
-        st.dataframe(df[['date', 'vehicle_no', 'origin', 'destination', 'amount', 'description']], use_container_width=True, hide_index=True)
+        st.metric("Total Revenue/Expense", f"₹{df['amount'].sum():,.2f}")
+        # Added 'days' to the dashboard table
+        st.dataframe(
+            df[['date', 'vehicle_no', 'days', 'origin', 'destination', 'amount', 'description']], 
+            use_container_width=True, 
+            hide_index=True
+        )
